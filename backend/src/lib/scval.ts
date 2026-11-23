@@ -99,9 +99,40 @@ export function buildReclaimArgs(escrowId: number | bigint): xdr.ScVal[] {
  * is the timelock escape hatch from `Disputed`, not the expiry refund from
  * `Active`. Keep it separate so the two calls cannot be swapped silently.
  */
+
+/**
+ * `escrow.cancel(escrow_id)`
+ */
+export function buildCancelArgs(escrowId: number | bigint): xdr.ScVal[] {
+  return [scU64(escrowId)];
+}
+
+*/
+
+/**
+ * `escrow.reclaim_after_dispute_timeout(escrow_id)`
+ *
+ * Same single-`u64` shape as `reclaim_expired`, but a different entry point: this
+ * is the timelock escape hatch from `Disputed`, not the expiry refund from
+ * `Active`. Keep it separate so the two calls cannot be swapped silently.
+ */
 export function buildReclaimDisputeArgs(escrowId: number | bigint): xdr.ScVal[] {
   return [scU64(escrowId)];
 }
+
+*/
+
+/**
+ * `escrow.reclaim_milestone(escrow_id, milestone_index)`
+ */
+export function buildReclaimMilestoneArgs(
+  escrowId: number | bigint,
+  milestoneIndex: number,
+): xdr.ScVal[] {
+  return [scU64(escrowId), scU32(milestoneIndex)];
+}
+
+*/
 
 /** `escrow.open_dispute(escrow_id, initiator)` */
 export function buildOpenDisputeArgs(

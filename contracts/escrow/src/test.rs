@@ -1512,4 +1512,64 @@ fn create_rejects_milestone_maps_whose_keys_are_not_sorted() {
         err.contains("rejected") || err.contains("does not parse"),
         "unexpected failure: {err}"
     );
+
+#[test]
+fn cancel_created_escrow_and_reject_funding_it_again() {
+    let f = fixture();
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[300, 700]),
+        &10_000,
+    );
+
+    f.c().cancel(&id);
+    assert_eq!(f.c().get(&id).status, EscrowStatus::Cancelled);
+    let res = f.c().try_fund(&id);
+    assert!(matches!(res, Err(Ok(EscrowError::InvalidStatus))));
+}
+
+#[test]
+fn reclaim_milestone_refunds_only_unreleased_portion() {
+    let f = fixture();
+    let mut ms = milestones(&f.env, &[400, 600]);
+    ms.set(
+        0,
+        Milestone {
+            amount: 400,
+            released: false,
+            released_amount: 0,
+            deadline: 1_500,
+        },
+    );
+    ms.set(
+        1,
+        Milestone {
+            amount: 600,
+            released: false,
+            released_amount: 0,
+            deadline: 9_000,
+        },
+    );
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &ms,
+        &10_000,
+    );
+    f.c().fund(&id);
+    f.c().release_partial(&id, &0, &150);
+
+    f.env.ledger().set_timestamp(1_501);
+    f.c().reclaim_milestone(&id, &0);
+
+    assert_eq!(f.balance(&f.client), 9_000 + 250);
+    assert_eq!(f.balance(&f.freelancer), 150);
+    assert_eq!(f.balance(&f.escrow), 600);
+    assert_eq!(f.c().get(&id).status, EscrowStatus::Active);
+    let reclaimed = f.c().get(&id).milestones.get(0).unwrap();
+    assert!(reclaimed.released);
+    assert_eq!(reclaimed.released_amount, 400);
 }

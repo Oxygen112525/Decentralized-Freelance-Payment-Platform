@@ -23,9 +23,11 @@ import { Contract } from "@stellar/stellar-sdk";
 import { config } from "../config";
 import { buildCreateArgs, buildUpdateMilestonesArgs } from "../lib/escrowArgs";
 import {
+  buildCancelArgs,
   buildFundArgs,
   buildReclaimArgs,
   buildReclaimDisputeArgs,
+  buildReclaimMilestoneArgs,
   buildReleaseMilestoneArgs,
   buildReleasePartialArgs,
 } from "../lib/scval";
@@ -549,6 +551,47 @@ escrowRouter.post("/build/reclaim", requireAuth, validate(z.object({ escrowId: e
     next(err);
   }
 });
+
+// POST /api/escrow/build/cancel
+escrowRouter.post("/build/cancel", requireAuth, validate(z.object({ escrowId: escrowIdSchema })), async (req, res, next) => {
+  try {
+    const contract = new Contract(config.ESCROW_CONTRACT_ID);
+    const xdr = await buildTx(
+      res.locals.stellarAddress,
+      contract.call("cancel", ...buildCancelArgs(req.body.escrowId)),
+    );
+    res.json({ xdr });
+  } catch (err) {
+    next(err);
+  }
+});// POST /api/escrow/build/reclaim-milestone
+//
+// The client reclaims the unreleased portion of one overdue milestone.
+// The contract enforces the milestone deadline in `reclaim_milestone`. If the
+// deadline has not passed, the simulation fails with `NotExpired`, otherwise the
+// remaining amount on the milestone is refunded to the client.
+escrowRouter.post(
+  "/build/reclaim-milestone",
+  requireAuth,
+  validate(z.object({
+    escrowId: escrowIdSchema,
+    milestoneIndex: z.number().int().nonnegative(),
+  })),
+  async (req, res, next) => {
+    try {
+      const contract = new Contract(config.ESCROW_CONTRACT_ID);
+      const xdr = await buildTx(
+        res.locals.stellarAddress,
+        contract.call(
+          "reclaim_milestone",
+          ...buildReclaimMilestoneArgs(req.body.escrowId, req.body.milestoneIndex),
+        ),
+      );
+      res.json({ xdr });
+    } catch (err) {
+      next(err);
+    }
+  }),
 
 // POST /api/escrow/build/reclaim-dispute
 //
