@@ -22,6 +22,7 @@ pub enum EscrowStatus {
     Completed,
     Disputed,
     Refunded,
+    Cancelled,
 }
 
 #[contracttype]
@@ -34,11 +35,11 @@ pub struct Milestone {
     pub released_amount: i128,
     /// Unix timestamp by which this milestone is expected to be released.
     ///
-    /// **Advisory only — the escrow does not enforce it.** There is no
-    /// per-milestone reclaim: `reclaim_expired` refunds *every* unreleased
-    /// milestone once the escrow-level `expiry` passes, and the contract never
-    /// reads a milestone's `deadline`. Treat it as descriptive metadata until
-    /// per-milestone reclaim is implemented (see issue #48).
+    /// The contract now enforces this deadline in
+    /// [`crate::EscrowContract::reclaim_milestone`] (client-initiated per-milestone
+    /// reclaim). The milestone-level deadline is still distinct from the escrow-level
+    /// `expiry` used by `reclaim_expired`, which refunds *every* unreleased milestone
+    /// at once and does not look at individual milestones.
     pub deadline: u64,
 }
 
