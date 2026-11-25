@@ -78,13 +78,19 @@ const authenticate = (baseUrl: string) =>
     body: JSON.stringify({ address: ADDRESS, signature: "sig", nonce: "nonce" }),
   });
 
-describe("GET /api/users/challenge rate limit", () => {
+const postChallenge = (baseUrl: string) => fetch(`${baseUrl}/api/users/challenge`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ address: ADDRESS }),
+});
+
+describe("wallet challenge rate limit", () => {
   it("rejects requests beyond the dedicated budget with a JSON 429", async () => {
     await withApp(async (baseUrl) => {
-      expect((await challenge(baseUrl)).status).toBe(200);
+      expect((await postChallenge(baseUrl)).status).toBe(200);
       expect((await challenge(baseUrl)).status).toBe(200);
 
-      const blocked = await challenge(baseUrl);
+      const blocked = await postChallenge(baseUrl);
       expect(blocked.status).toBe(429);
       expect(blocked.headers.get("ratelimit-policy") ?? blocked.headers.get("ratelimit-limit")).toBeTruthy();
       await expect(blocked.json()).resolves.toEqual({

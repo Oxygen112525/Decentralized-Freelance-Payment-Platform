@@ -842,6 +842,7 @@ export default function JobDetail() {
                             <br />
                             <input
                               type="file"
+                              accept=".pdf,.png,.jpg,.jpeg,.zip"
                               onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
                               required
                             />

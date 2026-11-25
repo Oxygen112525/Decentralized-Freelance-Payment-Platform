@@ -803,17 +803,7 @@ impl EscrowContract {
         if escrow.status != EscrowStatus::Disputed {
             return Err(EscrowError::InvalidStatus);
         }
-        if client_share < 0 || freelancer_share < 0 {
-            return Err(EscrowError::InvalidShares);
-        }
-
-        let remaining = Self::remaining(&escrow)?;
-        let total_share = client_share
-            .checked_add(freelancer_share)
-            .ok_or(EscrowError::Overflow)?;
-        if total_share != remaining {
-            return Err(EscrowError::InvalidShares);
-        }
+        validate_resolution_split(Self::remaining(&escrow)?, client_share, freelancer_share)?;
 
         // Effects before interaction: mark every milestone fully released and complete.
         for i in 0..escrow.milestones.len() {
@@ -1041,3 +1031,21 @@ impl EscrowContract {
 
 #[cfg(test)]
 mod test;
+
+/// Validate the two payout amounts against the remaining escrow balance.
+pub fn validate_resolution_split(
+    remaining: i128,
+    client_share: i128,
+    freelancer_share: i128,
+) -> Result<(), EscrowError> {
+    if client_share < 0 || freelancer_share < 0 {
+        return Err(EscrowError::InvalidShares);
+    }
+    let total_share = client_share
+        .checked_add(freelancer_share)
+        .ok_or(EscrowError::Overflow)?;
+    if total_share != remaining {
+        return Err(EscrowError::InvalidShares);
+    }
+    Ok(())
+}
