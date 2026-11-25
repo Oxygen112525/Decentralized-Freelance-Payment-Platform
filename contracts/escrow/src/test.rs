@@ -14,7 +14,7 @@ extern crate std;
 
 use crate::{
     DataKey, EscrowContract, EscrowContractClient, EscrowError, EscrowStatus, Milestone,
-    DISPUTE_CONTRACT_TIMELOCK_SECONDS, TTL_EXTEND_TO, TTL_THRESHOLD,
+    DISPUTE_CONTRACT_TIMELOCK_SECONDS, MAX_ESCROW_DURATION_SECONDS, TTL_EXTEND_TO, TTL_THRESHOLD,
 };
 use soroban_sdk::{
     testutils::{storage::Persistent as _, Address as _, Events as _, Ledger},
@@ -242,6 +242,64 @@ fn create_rejects_past_expiry() {
         &1_000, // == now
     );
     assert!(matches!(res, Err(Ok(EscrowError::InvalidExpiry))));
+}
+
+#[test]
+fn create_accepts_expiry_at_max_duration() {
+    let f = fixture();
+    // Exactly 365 days from the current ledger time is still valid.
+    let expiry = 1_000 + MAX_ESCROW_DURATION_SECONDS;
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[100]),
+        &expiry,
+    );
+    assert_eq!(f.c().get(&id).expiry, expiry);
+}
+
+#[test]
+fn create_rejects_expiry_beyond_max_duration() {
+    let f = fixture();
+    // One second past the cap must be refused.
+    let expiry = 1_000 + MAX_ESCROW_DURATION_SECONDS + 1;
+    let res = f.c().try_create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[100]),
+        &expiry,
+    );
+    assert!(matches!(res, Err(Ok(EscrowError::InvalidExpiry))));
+    // The rejected call must not have consumed an escrow id.
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[100]),
+        &10_000,
+    );
+    assert_eq!(id, 0);
+}
+
+#[test]
+fn create_rejects_far_future_expiry_typo() {
+    let f = fixture();
+    // A milliseconds-instead-of-seconds style bug: ~50,000 years ahead.
+    for expiry in [1_700_000_000_000u64, u64::MAX] {
+        let res = f.c().try_create(
+            &f.client,
+            &f.freelancer,
+            &f.token,
+            &milestones(&f.env, &[100]),
+            &expiry,
+        );
+        assert!(
+            matches!(res, Err(Ok(EscrowError::InvalidExpiry))),
+            "expiry {expiry} must be rejected"
+        );
+    }
 }
 
 #[test]

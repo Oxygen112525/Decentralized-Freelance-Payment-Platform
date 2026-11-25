@@ -44,6 +44,14 @@ const TTL_THRESHOLD: u32 = 30 * DAY_IN_LEDGERS;
 const TTL_EXTEND_TO: u32 = 90 * DAY_IN_LEDGERS;
 /// Default seconds after a dispute is opened before the client can reclaim.
 const DEFAULT_DISPUTE_TIMEOUT_SECONDS: u64 = 7 * 24 * 60 * 60;
+/// Longest accepted escrow lifetime, measured from creation: 365 days.
+///
+/// `reclaim_expired` is the client's only way back to the funds without a
+/// dispute, and it only works once `expiry` has passed. An unbounded `expiry`
+/// (a unit-confused millisecond value, or `u64::MAX`) would therefore lock
+/// deposited funds until a dispute is raised, so `create` caps the distance
+/// between the current ledger time and the requested deadline.
+pub const MAX_ESCROW_DURATION_SECONDS: u64 = 365 * 24 * 60 * 60;
 /// Maximum number of milestones per escrow. Keeps every loop within the
 /// Soroban CPU budget and prevents `resolve`/`remaining` from being blocked
 /// by an unbounded list. Must match the cap enforced by the frontend.
@@ -415,7 +423,9 @@ impl EscrowContract {
     /// - `freelancer` – party delivering the work
     /// - `token`      – SAC-compatible token address (e.g. USDC)
     /// - `milestones` – ordered list of milestones; each amount must be > 0
-    /// - `expiry`     – unix timestamp safety deadline, must be in the future
+    /// - `expiry`     – unix timestamp safety deadline, must be in the future and
+    ///   no more than [`MAX_ESCROW_DURATION_SECONDS`] (365 days) ahead. Both
+    ///   bounds fail with `InvalidExpiry`.
     ///
     /// Returns the new escrow ID.
     pub fn create(
@@ -438,7 +448,16 @@ impl EscrowContract {
         if client == freelancer {
             return Err(EscrowError::InvalidCounterparty);
         }
-        if expiry <= env.ledger().timestamp() {
+        let now = env.ledger().timestamp();
+        if expiry <= now {
+            return Err(EscrowError::InvalidExpiry);
+        }
+        // Upper bound: a deadline far enough out that `reclaim_expired` can
+        // never realistically run would defeat the expiry safety net.
+        let max_expiry = now
+            .checked_add(MAX_ESCROW_DURATION_SECONDS)
+            .ok_or(EscrowError::Overflow)?;
+        if expiry > max_expiry {
             return Err(EscrowError::InvalidExpiry);
         }
 
