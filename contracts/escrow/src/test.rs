@@ -544,6 +544,147 @@ fn update_milestones_after_expiry_is_rejected() {
 }
 
 // ---------------------------------------------------------------------------
+// cancel
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cancel_marks_escrow_cancelled() {
+    let f = fixture();
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[300, 700]),
+        &10_000,
+    );
+
+    f.c().cancel(&id);
+
+    let data = f.c().get(&id);
+    assert_eq!(data.status, EscrowStatus::Cancelled);
+    assert_eq!(data.total_amount, 1_000, "terms are kept for audit");
+    assert_eq!(f.balance(&f.client), 10_000, "no funds moved");
+    assert_eq!(f.balance(&f.escrow), 0, "nothing was ever deposited");
+}
+
+#[test]
+fn cancelled_event_carries_client() {
+    let f = fixture();
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[1_000]),
+        &10_000,
+    );
+
+    f.c().cancel(&id);
+
+    let data = event_data(&f.env, "cancelled");
+    let client: Address = field(&f.env, &data, "client");
+    let escrow_id: u64 = event_topic1(&f.env, "cancelled");
+    assert_eq!(escrow_id, id);
+    assert_eq!(client, f.client);
+}
+
+#[test]
+fn cancel_after_funding_is_rejected() {
+    let f = fixture();
+    let id = f.funded(&[1_000]);
+    let res = f.c().try_cancel(&id);
+    assert!(matches!(res, Err(Ok(EscrowError::InvalidStatus))));
+    assert_eq!(f.c().get(&id).status, EscrowStatus::Active);
+    assert_eq!(f.balance(&f.escrow), 1_000, "funds stay in escrow");
+}
+
+#[test]
+fn cancel_after_dispute_is_rejected() {
+    let f = fixture();
+    let id = f.funded(&[1_000]);
+    f.c().open_dispute(&id, &f.client);
+    let res = f.c().try_cancel(&id);
+    assert!(matches!(res, Err(Ok(EscrowError::InvalidStatus))));
+    assert_eq!(f.c().get(&id).status, EscrowStatus::Disputed);
+}
+
+#[test]
+fn cancel_after_completion_is_rejected() {
+    let f = fixture();
+    let id = f.funded(&[1_000]);
+    f.c().release_milestone(&id, &0);
+    let res = f.c().try_cancel(&id);
+    assert!(matches!(res, Err(Ok(EscrowError::InvalidStatus))));
+}
+
+#[test]
+fn cancel_twice_is_rejected() {
+    let f = fixture();
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[1_000]),
+        &10_000,
+    );
+    f.c().cancel(&id);
+    let res = f.c().try_cancel(&id);
+    assert!(matches!(res, Err(Ok(EscrowError::InvalidStatus))));
+}
+
+#[test]
+fn cancelled_escrow_cannot_be_funded_or_updated() {
+    let f = fixture();
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[1_000]),
+        &10_000,
+    );
+    f.c().cancel(&id);
+
+    let res = f.c().try_fund(&id);
+    assert!(matches!(res, Err(Ok(EscrowError::InvalidStatus))));
+    let res = f
+        .c()
+        .try_update_milestones(&id, &milestones(&f.env, &[500]));
+    assert!(matches!(res, Err(Ok(EscrowError::InvalidStatus))));
+    assert_eq!(f.balance(&f.escrow), 0);
+}
+
+#[test]
+fn cancel_unknown_escrow_is_rejected() {
+    let f = fixture();
+    let res = f.c().try_cancel(&999);
+    assert!(matches!(res, Err(Ok(EscrowError::NotFound))));
+}
+
+#[test]
+fn cancel_is_blocked_while_paused() {
+    let f = fixture();
+    let admin = Address::generate(&f.env);
+    let dispute = Address::generate(&f.env);
+    f.c().init(&admin, &dispute);
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[1_000]),
+        &10_000,
+    );
+
+    f.c().pause();
+    assert!(matches!(
+        f.c().try_cancel(&id),
+        Err(Ok(EscrowError::Paused))
+    ));
+
+    f.c().unpause();
+    f.c().cancel(&id);
+    assert_eq!(f.c().get(&id).status, EscrowStatus::Cancelled);
+}
+
+// ---------------------------------------------------------------------------
 // fund
 // ---------------------------------------------------------------------------
 
@@ -1592,6 +1733,22 @@ fn set_dispute_timeout_requires_admin_auth() {
     init_escrow(&f, &admin, &dispute);
     f.env.set_auths(&[]);
     f.c().set_dispute_timeout(&120);
+}
+
+#[test]
+#[should_panic]
+fn cancel_requires_client_auth() {
+    // A non-client cannot produce the client's authorization, so the call panics.
+    let f = fixture();
+    let id = f.c().create(
+        &f.client,
+        &f.freelancer,
+        &f.token,
+        &milestones(&f.env, &[1_000]),
+        &10_000,
+    );
+    f.env.set_auths(&[]);
+    f.c().cancel(&id);
 }
 
 #[test]

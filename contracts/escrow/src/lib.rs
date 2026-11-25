@@ -6,6 +6,7 @@
 //! # State Machine
 //!
 //!   Created → Active → Completed
+//!         ↘ Cancelled (via cancel, before funding)
 //!                  ↘ Disputed → Completed (via dispute contract)
 //!                  ↘ Refunded (via reclaim_expired)
 //!
@@ -149,6 +150,16 @@ pub struct Refunded {
     pub escrow_id: u64,
     pub client: Address,
     pub amount: i128,
+}
+
+/// An unfunded `Created` escrow was closed by its client. Terminal state, and
+/// the signal for indexers to stop mirroring a job that will never be funded.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Cancelled {
+    #[topic]
+    pub escrow_id: u64,
+    pub client: Address,
 }
 
 #[contractevent]
@@ -543,6 +554,40 @@ impl EscrowContract {
             escrow_id,
             count,
             total_amount,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Close an unfunded escrow before any money moves.
+    ///
+    /// Client-only, and only while the escrow is still `Created`. Funded
+    /// (`Active`), `Disputed`, `Completed`, `Refunded` and already `Cancelled`
+    /// escrows are rejected with [`EscrowError::InvalidStatus`], so this can
+    /// never strand or move funds.
+    ///
+    /// The entry is kept with `status = Cancelled` rather than deleted, so the
+    /// escrow id stays resolvable through `get` and off-chain mirrors can
+    /// reconcile the closing event against the row they already created. An
+    /// expired-but-unfunded escrow can still be cancelled: `fund` refuses it
+    /// (`InvalidExpiry`), so cancelling is the only way to close it cleanly.
+    pub fn cancel(env: Env, escrow_id: u64) -> Result<(), EscrowError> {
+        Self::require_not_paused(&env)?;
+        let mut escrow = Self::load(&env, escrow_id)?;
+        escrow.client.require_auth();
+
+        if escrow.status != EscrowStatus::Created {
+            return Err(EscrowError::InvalidStatus);
+        }
+
+        // Effects only: a `Created` escrow holds no funds, so there is no
+        // interaction to follow.
+        escrow.status = EscrowStatus::Cancelled;
+        Self::save(&env, escrow_id, &escrow);
+
+        Cancelled {
+            escrow_id,
+            client: escrow.client.clone(),
         }
         .publish(&env);
         Ok(())
